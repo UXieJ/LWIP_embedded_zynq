@@ -34,6 +34,7 @@
 #include "lwip/inet.h"
 #include "dma_app.h"
 
+
 #if LWIP_IPV6==1
 #include "lwip/ip6_addr.h"
 #include "lwip/ip6.h"
@@ -44,7 +45,7 @@
 extern volatile int dhcp_timoutcntr;
 err_t dhcp_start(struct netif *netif);
 #endif
-#define DEFAULT_IP_ADDRESS "192.168.1.10"
+#define DEFAULT_IP_ADDRESS "192.168.1.10" //server address
 #define DEFAULT_IP_MASK "255.255.255.0"
 #define DEFAULT_GW_ADDRESS "192.168.1.1"
 #endif /* LWIP_IPV6 */
@@ -57,16 +58,18 @@ int IicPhyReset(void);
 
 static int complete_nw_thread;
 static sys_thread_t main_thread_handle;
-SemaphoreHandle_t xtSemaphore = NULL;
+
+xSemaphoreHandle command_signal=0;
 
 void print_app_header();
-void TCP_application();
+void TCP_application(void);
 void UDPbroadcast_thread(void);
-void UDP_application();
+void UDP_application(void);
 
 
 
 #define THREAD_STACKSIZE 1024
+#define DATA_SERVER_THREAD_STACKSIZE 2048
 
 struct netif server_netif;
 
@@ -216,10 +219,7 @@ void main_thread(void *p)
 	print_ip_settings(&(server_netif.ip_addr), &(server_netif.netmask),
 				&(server_netif.gw));
 #endif /* LWIP_IPV6 */
-	xtSemaphore = xSemaphoreCreateBinary();
 	xil_printf("\r\n");
-
-
 
 	/* print all application headers */
 	print_app_header();
@@ -227,10 +227,13 @@ void main_thread(void *p)
 
 	/* start the application*/
 //	dma_app();
-	sys_thread_new("udp_broadcast_thread", UDPbroadcast_thread, NULL, 1024, 1 );
-	UDP_application();
-	TCP_application();
-	vTaskDelete(NULL);
+	vSemaphoreCreateBinary(command_signal);
+	taskENTER_CRITICAL();
+	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
+	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
+	sys_thread_new("TCP_thread", (void*)TCP_application, NULL, THREAD_STACKSIZE, 5 );
+	taskEXIT_CRITICAL();
+
 	return;
 }
 

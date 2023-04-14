@@ -117,6 +117,8 @@ struct tcp_msg{
 
 /* server port to listen on/connect to */
 #define TCP_CONN_PORT 5001
+#define UDP_CAST_PORT 8000
+#define UDP_DATA_PORT 9000
 
 
 

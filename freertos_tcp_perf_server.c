@@ -36,7 +36,7 @@ extern struct netif server_netif;
 static struct perf_stats server;
 extern u8 *RxBufferPtr0;
 extern u8 *RxBufferPtr1;
-extern SemaphoreHandle_t xtSemaphore;
+extern SemaphoreHandle_t command_signal;
 extern u8 dma_recv_coming_flag;
 extern u8 pingpang_flag;
 
@@ -119,7 +119,7 @@ void UDPbroadcast_thread(void)
 		return;
 	}
 	address.sin6_family = AF_INET6;
-	address.sin6_port = htons(TCP_CONN_PORT);
+	address.sin6_port = htons(UDP_CAST_PORT);
 	address.sin6_len = sizeof(address);
 #else
 	if ((sock = lwip_socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -127,9 +127,9 @@ void UDPbroadcast_thread(void)
 		return;
 	}
 	address.sin_family = AF_INET;
-	address.sin_port = htons(9000);
+	address.sin_port = htons(UDP_CAST_PORT);
 	address.sin_addr.s_addr = inet_addr("192.168.1.255");
-
+	//192.168.1.255
 #endif /* LWIP_IPV6 */
 	struct udp_broadcast *udp_cast;
 	udp_cast = mem_malloc(sizeof(struct udp_broadcast));
@@ -142,7 +142,7 @@ void UDPbroadcast_thread(void)
 	udp_cast->u1.hardversion =convert_end32(0x12345678);
 	udp_cast->u1.firmware_version=convert_end32(0x22345678);
 	udp_cast->u1.sub_version =convert_end32(0x32345678);
-	udp_cast->u1.port=htons(9000);
+	udp_cast->u1.port=htons(UDP_CAST_PORT);
 	udp_cast->crc=convert_end16(crc_16((u8*)udp_cast,46)); //TODO the length of crc might be wrong, need to be checked later
 		while (1)
 		{
@@ -318,58 +318,6 @@ static void tcp_conn_report(u64_t diff, enum report_type report_type)
 }
 
 
-//Broadcast in the LAN, so that PC can get the IP address of LIDAR
-//void UDP_broadcast(void)
-//{
-//
-//	int sock;
-//#if LWIP_IPV6==1
-//	struct sockaddr_in6 address;
-//#else
-//	struct sockaddr_in address;
-//#endif /* LWIP_IPV6 */
-//
-//	/* set up address to connect to */
-//    memset(&address, 0, sizeof(address));
-//#if LWIP_IPV6==1
-//	if ((sock = lwip_socket(AF_INET6, SOCK_DGRAM, 0)) < 0) {
-//		xil_printf("UDP broadcast: Error creating Socket\r\n");
-//		return;
-//	}
-//	address.sin6_family = AF_INET6;
-//	address.sin6_port = htons(TCP_CONN_PORT);
-//	address.sin6_len = sizeof(address);
-//#else
-//	if ((sock = lwip_socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-//		xil_printf("UDP broadcast: Error creating Socket\r\n");
-//		return;
-//	}
-//	address.sin_family = AF_INET;
-//	address.sin_port = htons(9000);
-//	address.sin_addr.s_addr = inet_addr("192.168.1.255");
-//
-//#endif /* LWIP_IPV6 */
-//	//to form the packet
-////	udp_cast->frameheader = convert_end32(0x484f5354);
-////	udp_cast->length = convert_end32(0x1C);
-////	udp_cast->command =convert_end32(0x00000001);
-////	udp_cast->seq =convert_end32(0x00000001);
-//////		crc_16((u8*)udp_broadcast,4);
-////	udp_cast->u1.hardversion =convert_end32(0x12345678);
-////	udp_cast->u1.firmware_version=convert_end32(0x22345678);
-////	udp_cast->u1.sub_version =convert_end32(0x32345678);
-////	udp_cast->u1.port=htons(9000);
-////	udp_cast->crc=convert_end16(crc16((u8*)udp_cast,46)); //TODO the length of crc might be wrong, need to be checked later
-//
-//    while (1)
-//    {
-//	        /* 发送广播数据
-//	         * lwip_sendto(int s, const void *data, size_t size, int flags,
-//    	sendto(sock,udp_cast,46,1,(struct sockaddr *)&address, sizeof (address));
-//    	vTaskDelay(1000);*/
-//    	sys_thread_new("udp_broadcast_thread", UDPbroadcast_thread,  (void*)&sock, 1024, DEFAULT_THREAD_PRIO );
-//    }
-//}
 
 void UDP_application(void)
 {
@@ -414,6 +362,8 @@ void UDP_application(void)
 		address_host.sin_port = htons(9000);
 		address_host.sin_addr.s_addr = inet_addr("192.168.1.3");
 		while (1) {
+			if(xSemaphoreTake(command_signal,portMAX_DELAY))
+			{
 //
 			if(dma_recv_coming_flag == 1)
 			{
@@ -429,9 +379,10 @@ void UDP_application(void)
 						sendto(sock,RxBufferPtr1,POINTCLOUD_PKT_LEN,0,(struct sockaddr *)&address_host, sizeof (address_host));
 //					xil_printf("recv_complete1");
 				}
-//				vTaskDelay(500);
 
 			}
+			vTaskDelay(1);
+		}
 		}
 }
 
@@ -443,6 +394,8 @@ void tcp_recv_perf_traffic(void *p)
 	int read_bytes;
 	u16 data_length;
 	int sock = *((int *)p);
+	static u8 heartBeat[]="No heart beat from the PC. TCP is disconnected.";
+	static u8 INVALIDCOMMAND[]="------ERROR:INVALID COMMAND FROM CLIENT-------";
 
 	server.start_time = sys_now() * portTICK_RATE_MS;
 	server.client_id++;
@@ -492,17 +445,26 @@ void tcp_recv_perf_traffic(void *p)
 		server.total_bytes += read_bytes;
 		data_length = recv_buf[6]*256+recv_buf[7];
 		//determine the total length of receive buffer: 4+4+4+4+2 + length of data (byte)
-		u16 total = data_length + 18 ;
+//		u16 total = data_length + 18 ;
 		xil_printf("length of data: %x   total length: %d \n\r",data_length, read_bytes);
 		u32 seqs = (recv_buf[12] << 24) | (recv_buf[13] << 16) | (recv_buf[14] << 8) | recv_buf[15];
 		u16 recv_crc =  convert_end16((recv_buf[read_bytes-2]<<8)| recv_buf[read_bytes-1]);
 		u16 crc_t =crc_16(recv_buf,read_bytes-2);
 		u16 diff = crc_t-recv_crc;
+		xSemaphoreGive(command_signal);
 
+		if (recv_buf[11]==0x02)
+		{
+			char temp=NULL;
+			temp = recv_buf[12];
+			if(temp!=0x00)
+			{
+				send(sock,heartBeat,sizeof(heartBeat),0);
+				break;
+			}
+		}
 
-
-
-		if (recv_buf[11]==0x11)
+		else if (recv_buf[11]==0x11)
 		{
 		/* xil_printf(" sequence: %d  ",seqs);
 			 * u32 ttttt =(recv_buf[0]<<24) |(recv_buf[1] << 16) | (recv_buf[2]<<8) | recv_buf[3];
@@ -535,8 +497,9 @@ void tcp_recv_perf_traffic(void *p)
 		}
 		else
 		{
-			xil_printf("------ERROR:INVALID COMMAND FROM CLIENT-------");
+			send(sock,INVALIDCOMMAND,sizeof(INVALIDCOMMAND),0);
 		}
+		vTaskDelay(1);
 	}
 
 	/* close connection */
