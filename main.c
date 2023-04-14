@@ -226,14 +226,15 @@ void main_thread(void *p)
 	xil_printf("\r\n");
 
 	/* start the application*/
-//	dma_app();
+	dma_app();
 	vSemaphoreCreateBinary(command_signal);
-	taskENTER_CRITICAL();
 	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
-	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
+	taskENTER_CRITICAL();
 	sys_thread_new("TCP_thread", (void*)TCP_application, NULL, THREAD_STACKSIZE, 5 );
+	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
 	taskEXIT_CRITICAL();
 
+	vTaskDelete(NULL);
 	return;
 }
 

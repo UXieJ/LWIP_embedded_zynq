@@ -451,7 +451,6 @@ void tcp_recv_perf_traffic(void *p)
 		u16 recv_crc =  convert_end16((recv_buf[read_bytes-2]<<8)| recv_buf[read_bytes-1]);
 		u16 crc_t =crc_16(recv_buf,read_bytes-2);
 		u16 diff = crc_t-recv_crc;
-		xSemaphoreGive(command_signal);
 
 		if (recv_buf[11]==0x02)
 		{
@@ -460,6 +459,7 @@ void tcp_recv_perf_traffic(void *p)
 			if(temp!=0x00)
 			{
 				send(sock,heartBeat,sizeof(heartBeat),0);
+				xSemaphoreGive(command_signal);
 				break;
 			}
 		}
@@ -488,6 +488,8 @@ void tcp_recv_perf_traffic(void *p)
 		{
 
 			send(sock,tcp_release(&tcp_release_p,diff, seqs), 19,0);
+			xSemaphoreGive(command_signal);
+			break;
 
 		}
 		else if(recv_buf[11]== 0x20)
