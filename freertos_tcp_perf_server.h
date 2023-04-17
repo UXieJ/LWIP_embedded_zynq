@@ -95,8 +95,9 @@ struct udp_broadcast{
 		u32_t hardversion;
 		u32_t firmware_version;
 		u32_t sub_version;
-		u16 port;
-		u8 datanull[10];
+		u16 tcp_port;
+		u16 udp_port;
+		u8 datanull[12];
 	}u1;
 	u16_t crc;
 };

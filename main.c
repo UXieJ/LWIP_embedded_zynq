@@ -227,12 +227,12 @@ void main_thread(void *p)
 
 	/* start the application*/
 	dma_app();
-	vSemaphoreCreateBinary(command_signal);
+//	vSemaphoreCreateBinary(command_signal);
 	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
-	taskENTER_CRITICAL();
+//	taskENTER_CRITICAL();
 	sys_thread_new("TCP_thread", (void*)TCP_application, NULL, THREAD_STACKSIZE, 5 );
+//	taskEXIT_CRITICAL();
 	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
-	taskEXIT_CRITICAL();
 
 	vTaskDelete(NULL);
 	return;

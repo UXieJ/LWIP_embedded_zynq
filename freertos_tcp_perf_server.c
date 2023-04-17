@@ -39,7 +39,7 @@ extern u8 *RxBufferPtr1;
 extern SemaphoreHandle_t command_signal;
 extern u8 dma_recv_coming_flag;
 extern u8 pingpang_flag;
-
+u8 send_data_flag;
 //define tcp variable
 struct tcp_msg tcp_ack_p;
 struct tcp_msg tcp_ack_op;
@@ -142,8 +142,9 @@ void UDPbroadcast_thread(void)
 	udp_cast->u1.hardversion =convert_end32(0x12345678);
 	udp_cast->u1.firmware_version=convert_end32(0x22345678);
 	udp_cast->u1.sub_version =convert_end32(0x32345678);
-	udp_cast->u1.port=htons(UDP_CAST_PORT);
-	udp_cast->crc=convert_end16(crc_16((u8*)udp_cast,46)); //TODO the length of crc might be wrong, need to be checked later
+	udp_cast->u1.tcp_port=htons(TCP_CONN_PORT);
+	udp_cast->u1.udp_port=htons(UDP_CAST_PORT);
+	udp_cast->crc=convert_end16(crc_16((u8*)udp_cast,44)); //TODO the length of crc might be wrong, need to be checked later
 		while (1)
 		{
 	    	sendto(sock,udp_cast,46,1,(struct sockaddr *)&address, sizeof (address));
@@ -322,6 +323,7 @@ static void tcp_conn_report(u64_t diff, enum report_type report_type)
 void UDP_application(void)
 {
 	int sock;
+	send_data_flag=0;
 	#if LWIP_IPV6==1
 		struct sockaddr_in6 address;
 	#else
@@ -355,37 +357,35 @@ void UDP_application(void)
 			return;
 		}
 
-
 		struct sockaddr_in address_host;
         memset(&address_host, 0, sizeof(address_host));
 		address_host.sin_family = AF_INET;
 		address_host.sin_port = htons(9000);
 		address_host.sin_addr.s_addr = inet_addr("192.168.1.3");
-		while (1) {
-			if(xSemaphoreTake(command_signal,portMAX_DELAY))
+		while (1)
+		{
+			if(send_data_flag==1)
 			{
-//
-			if(dma_recv_coming_flag == 1)
-			{
-				dma_recv_coming_flag = 0;
+				if(dma_recv_coming_flag == 1)
 
-				if(pingpang_flag == 0)
-				{
-//					xil_printf("recv_complete");
-						sendto(sock,RxBufferPtr0,POINTCLOUD_PKT_LEN,0,(struct sockaddr *)&address_host, sizeof (address_host));
-				}
-				else if(pingpang_flag == 1)
-				{
-						sendto(sock,RxBufferPtr1,POINTCLOUD_PKT_LEN,0,(struct sockaddr *)&address_host, sizeof (address_host));
-//					xil_printf("recv_complete1");
-				}
+					{
+						dma_recv_coming_flag = 0;
 
+						if(pingpang_flag == 0)
+						{
+							sendto(sock,RxBufferPtr0,POINTCLOUD_PKT_LEN,0,(struct sockaddr *)&address_host, sizeof (address_host));
+						}
+						else if(pingpang_flag == 1)
+						{
+							sendto(sock,RxBufferPtr1,POINTCLOUD_PKT_LEN,0,(struct sockaddr *)&address_host, sizeof (address_host));
+						}
+
+					}
 			}
-			vTaskDelay(1);
+				vTaskDelay(1);
 		}
-		}
-}
 
+}
 
 /* thread spawned for each connection */
 void tcp_recv_perf_traffic(void *p)
@@ -459,7 +459,6 @@ void tcp_recv_perf_traffic(void *p)
 			if(temp!=0x00)
 			{
 				send(sock,heartBeat,sizeof(heartBeat),0);
-				xSemaphoreGive(command_signal);
 				break;
 			}
 		}
@@ -473,6 +472,7 @@ void tcp_recv_perf_traffic(void *p)
 //			xil_printf("Is crc start coming?%x\n\r", crc_t);
 			CRC little endian */
 			send(sock,tcp_start_ack(&tcp_ack_p,diff, seqs), 19,0);
+			send_data_flag=1;
 		}
 		else if(recv_buf[11]== 0x12)
 		{
@@ -486,9 +486,8 @@ void tcp_recv_perf_traffic(void *p)
 		}
 		else if(recv_buf[11]== 0x1E)
 		{
-
 			send(sock,tcp_release(&tcp_release_p,diff, seqs), 19,0);
-			xSemaphoreGive(command_signal);
+			send_data_flag=0;
 			break;
 
 		}
