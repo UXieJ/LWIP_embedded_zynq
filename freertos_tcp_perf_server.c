@@ -31,6 +31,7 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include <stdlib.h>
+#include "event_groups.h"
 
 extern struct netif server_netif;
 static struct perf_stats server;
@@ -39,7 +40,8 @@ extern u8 *RxBufferPtr1;
 extern SemaphoreHandle_t command_signal;
 extern u8 dma_recv_coming_flag;
 extern u8 pingpang_flag;
-u8 send_data_flag;
+extern EventGroupHandle_t EventGroupHandler;
+
 //define tcp variable
 struct tcp_msg tcp_ack_p;
 struct tcp_msg tcp_ack_op;
@@ -51,6 +53,10 @@ struct tcp_msg tcp_ctlACK_p;
 u16 crc_16();
 u32_t convert_end32();
 u16_t convert_end16();
+
+#define EVENTBIT_0 (1<<0)
+#define EVENTBIT_1 (1<<1)
+
 
 
 
@@ -323,7 +329,7 @@ static void tcp_conn_report(u64_t diff, enum report_type report_type)
 void UDP_application(void)
 {
 	int sock;
-	send_data_flag=0;
+	EventBits_t r_event;
 	#if LWIP_IPV6==1
 		struct sockaddr_in6 address;
 	#else
@@ -364,10 +370,13 @@ void UDP_application(void)
 		address_host.sin_addr.s_addr = inet_addr("192.168.1.3");
 		while (1)
 		{
-			if(send_data_flag==1)
+			xEventGroupWaitBits(EventGroupHandler, EVENTBIT_0 | EVENTBIT_1, pdFALSE, pdTRUE, portMAX_DELAY);
+			r_event =xEventGroupGetBits(EventGroupHandler);
+			if(r_event!=0)
 			{
-				if(dma_recv_coming_flag == 1)
+//				xil_printf("-----66666666666666------ %x",r_event);
 
+					if(dma_recv_coming_flag == 1)
 					{
 						dma_recv_coming_flag = 0;
 
@@ -381,8 +390,9 @@ void UDP_application(void)
 						}
 
 					}
+
+			vTaskDelay(1); //不加发送不了信息
 			}
-				vTaskDelay(1);
 		}
 
 }
@@ -472,23 +482,25 @@ void tcp_recv_perf_traffic(void *p)
 //			xil_printf("Is crc start coming?%x\n\r", crc_t);
 			CRC little endian */
 			send(sock,tcp_start_ack(&tcp_ack_p,diff, seqs), 19,0);
-			send_data_flag=1;
+			xEventGroupSetBits(EventGroupHandler, EVENTBIT_0);
 		}
 		else if(recv_buf[11]== 0x12)
 		{
 			send(sock, tcp_stop_ack(&tcp_ack_op,diff, seqs), 19,0);
+			xEventGroupClearBits(EventGroupHandler, EVENTBIT_0);
 
 		}
 		else if(recv_buf[11]== 0x1B)
 		{
 
 			send(sock, tcp_handle(&tcp_handle_p,diff, seqs), 19,0);
+			xEventGroupSetBits(EventGroupHandler, EVENTBIT_1);
+
 		}
 		else if(recv_buf[11]== 0x1E)
 		{
 			send(sock,tcp_release(&tcp_release_p,diff, seqs), 19,0);
-			send_data_flag=0;
-			break;
+			xEventGroupClearBits(EventGroupHandler, EVENTBIT_1);
 
 		}
 		else if(recv_buf[11]== 0x20)

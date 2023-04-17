@@ -33,7 +33,7 @@
 #include "lwip/init.h"
 #include "lwip/inet.h"
 #include "dma_app.h"
-
+#include "event_groups.h"
 
 #if LWIP_IPV6==1
 #include "lwip/ip6_addr.h"
@@ -59,7 +59,7 @@ int IicPhyReset(void);
 static int complete_nw_thread;
 static sys_thread_t main_thread_handle;
 
-xSemaphoreHandle command_signal=0;
+EventGroupHandle_t EventGroupHandler;
 
 void print_app_header();
 void TCP_application(void);
@@ -227,13 +227,12 @@ void main_thread(void *p)
 
 	/* start the application*/
 	dma_app();
-//	vSemaphoreCreateBinary(command_signal);
 	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
-//	taskENTER_CRITICAL();
+	taskENTER_CRITICAL();
+	EventGroupHandler = xEventGroupCreate();
 	sys_thread_new("TCP_thread", (void*)TCP_application, NULL, THREAD_STACKSIZE, 5 );
-//	taskEXIT_CRITICAL();
 	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
-
+	taskEXIT_CRITICAL();
 	vTaskDelete(NULL);
 	return;
 }
