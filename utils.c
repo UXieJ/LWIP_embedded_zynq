@@ -30,8 +30,8 @@ u16 crc_16(u8* data, u16 len)
 //			}
 //		}
 //		data++;
-
 		 crc16 ^= *data++;        // crc ^= *data; data++;
+
 		 for (int i = 0; i < 8; ++i)
 		 {
 		     if (crc16 & 1)
@@ -57,4 +57,6 @@ u16_t convert_end16(u16_t B)
 	B=(B <<8) | (B >>8);
 	return B;
 }
+
+
 

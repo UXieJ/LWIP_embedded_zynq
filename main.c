@@ -60,11 +60,17 @@ static int complete_nw_thread;
 static sys_thread_t main_thread_handle;
 
 EventGroupHandle_t EventGroupHandler;
+TaskHandle_t UDPAPP_Handler;
+TaskHandle_t UDPCAST_Handler;
 
+u8 config_p [258]={0}; //store the configure info [flash/tcp]
+
+/************************** Function Prototypes ******************************/
 void print_app_header();
 void TCP_application(void);
 void UDPbroadcast_thread(void);
 void UDP_application(void);
+
 
 
 
@@ -226,12 +232,26 @@ void main_thread(void *p)
 	xil_printf("\r\n");
 
 	/* start the application*/
-	dma_app();
-	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
+//	dma_app();
 	taskENTER_CRITICAL();
+//	sys_thread_new("udp_broadcast_thread", (void*)UDPbroadcast_thread, NULL, THREAD_STACKSIZE, 1 );
+	xTaskCreate( 	(TaskFunction_t ) (void*)UDPbroadcast_thread, /* 任务函数 */
+					(const char* )"udp_broadcast_thread", /* 任务名称 */
+					(uint16_t ) THREAD_STACKSIZE, /* 任务堆栈大小 */
+					(void* )NULL, /* 传入给任务函数的参数 */
+					(UBaseType_t )6, /* 任务优先级 */
+					(TaskHandle_t* )&UDPCAST_Handler); /* 任务句柄 */
 	EventGroupHandler = xEventGroupCreate();
 	sys_thread_new("TCP_thread", (void*)TCP_application, NULL, THREAD_STACKSIZE, 5 );
-	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
+
+	xTaskCreate( 	(TaskFunction_t ) (void*)UDP_application,
+					(const char* )"udp_data_thread",
+					(uint16_t ) DATA_SERVER_THREAD_STACKSIZE,
+					(void* )NULL,
+					(UBaseType_t )6,
+					(TaskHandle_t* )&UDPAPP_Handler);
+
+//	sys_thread_new("udp_data_thread", (void*)UDP_application, NULL, DATA_SERVER_THREAD_STACKSIZE, 6 );
 	taskEXIT_CRITICAL();
 	vTaskDelete(NULL);
 	return;
