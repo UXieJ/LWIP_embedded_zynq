@@ -89,6 +89,7 @@
 
 
 
+
 /************************** Constant Definitions *****************************/
 
 /*
@@ -148,14 +149,16 @@
  * The following constants specify the page size, sector size, and number of
  * pages and sectors for the FLASH.  The page size specifies a max number of
  * bytes that can be written to the FLASH with a single transfer.
+ * 1 block = 16 sectors, 1 sector start with 4KB, 32, 64 and 256 KB
  */
 #define SECTOR_SIZE		0x10000
 #define NUM_SECTORS		0x100 //256
 #define NUM_PAGES		0x10000 //65536
 #define PAGE_SIZE		256
 
+
 /* Number of flash pages to be written.*/
-#define PAGE_COUNT		5
+#define PAGE_COUNT		16 //4096
 
 /* Flash address to which data is ot be written.*/
 #define TEST_ADDRESS		0x00120000
@@ -177,9 +180,9 @@
 
 void FlashErase(XQspiPs *QspiPtr, u32 Address, u32 ByteCount);
 
-void FlashWrite(XQspiPs *QspiPtr, u32 Address, u32 ByteCount, u8 Command);
+void FlashWrite(XQspiPs *QspiPtr, u32 Address, u8 *WriteBuffer, u32 ByteCount);
 
-void FlashRead(XQspiPs *QspiPtr, u32 Address, u32 ByteCount, u8 Command);
+void FlashRead(XQspiPs *QspiPtr, u32 Address, u8 *ReadBuffer, u32 ByteCount);
 
 int FlashReadID(void);
 
@@ -192,6 +195,8 @@ int QspiFlashInit(XQspiPs *QspiInstancePtr, u16 QspiDeviceId);
 int QspiFlashPolledExample(XQspiPs *QspiInstancePtr,u8 *data_buf, u16 QspiDeviceId);
 
 u16 crc_16();
+u16 convert_end16();
+
 
 /************************** Variable Definitions *****************************/
 
@@ -221,7 +226,7 @@ int Test = 256;
 u8 ReadBuffer[MAX_DATA];
 u8 WriteBuffer[PAGE_SIZE+DATA_OFFSET+2];
 
-u8 ReadBuffer_config[258];
+u8 ReadBuffer_config[258]; //256+2+4
 u8 WriteBuffer_config[258];
 
 /*****************************************************************************/
@@ -291,22 +296,28 @@ int QspiFlashInit(XQspiPs *QspiInstancePtr, u16 QspiDeviceId)
 // read back config data from flash and store in a public variable
 	FlashReadID();
 
-	memset(ReadBuffer_config,0x00,sizeof(ReadBuffer_config));
+	FlashRead(QspiInstancePtr, PARAMCONF_ADDR, ReadBuffer_config, 258);
 
-	WriteBuffer_config[COMMAND_OFFSET]   = READ_CMD;
-	WriteBuffer_config[ADDRESS_1_OFFSET] = (u8)((PARAMCONF_ADDR & 0xFF0000) >> 16);
-	WriteBuffer_config[ADDRESS_2_OFFSET] = (u8)((PARAMCONF_ADDR & 0xFF00) >> 8);
-	WriteBuffer_config[ADDRESS_3_OFFSET] = (u8)(PARAMCONF_ADDR & 0xFF);
+	u16 crc_t;
+	u16 recv_crc;
+	u8 temp[256];
+	xil_printf("----------------test--------------------\n\r");
 
-	XQspiPs_PolledTransfer(QspiInstancePtr, WriteBuffer_config, ReadBuffer_config,
-			258 + OVERHEAD_SIZE);
-//	u16 crc_rdff = crc_16(ReadBuffer_config,256);//256 config_data + 2 crc
-	int Cnt;
-	for(Cnt = 0; Cnt < 258; Cnt++)
+	for(int i=0; i<256;i++)
 	{
-	    xil_printf(" 0x%x ", (ReadBuffer_config[Cnt+DATA_OFFSET]));
-	}
+		temp[i]=ReadBuffer_config[i];
+//		xil_printf("%x ",temp[i]);
 
+	}
+	crc_t =crc_16(temp,256);
+
+	recv_crc = (ReadBuffer_config[256]<<8)| ReadBuffer_config[257];
+	u16 diff = crc_t -recv_crc;
+	xil_printf("crc:%x ,recv_crc %x ",crc_t,recv_crc);
+	if(diff!= 0)
+	{
+		return XST_FAILURE;
+	}
 	return XST_SUCCESS;
 }
 
@@ -314,55 +325,53 @@ int FlashSend(XQspiPs *QspiInstancePtr ,u16 QspiDeviceId, u8 *config_p)
 {
 	//this function assume the QspiFlashInit already done initialization
 	int Count;
-	int Page;
-
+	u8 *BufferPtr;
 #define total_SIZE		258
-#define PAGE_SIZE		256
 
 
+
+
+
+//	for (Page = 0; Page < (total_SIZE-1)/PAGE_SIZE + 1; Page++) {
+//			  if(Page == (total_SIZE-1)/PAGE_SIZE){
+//					for (Count = 0; Count < total_SIZE%PAGE_SIZE; Count++)
+//					{
+//						WriteBuffer[Count+DATA_OFFSET] = config_p[Count+Page*PAGE_SIZE ];
+//					}
+//				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,total_SIZE%PAGE_SIZE, WRITE_CMD);
+//
+//			  }
+//			  else{
+//					for (Count = 0; Count < PAGE_SIZE; Count++)
+//					{
+//						WriteBuffer[Count+DATA_OFFSET] = config_p[Page*PAGE_SIZE + Count];
+//					}
+//				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,PAGE_SIZE, WRITE_CMD);
+//			  }
+//		    }
+//	WriteBuffer[Count] = config_p[Page*PAGE_SIZE + Count];
 	FlashErase(QspiInstancePtr, PARAMCONF_ADDR, total_SIZE);
-
-	for (Page = 0; Page < (total_SIZE-1)/PAGE_SIZE + 1; Page++) {
-			  if(Page == (total_SIZE-1)/PAGE_SIZE){
-					for (Count = 0; Count < total_SIZE%PAGE_SIZE; Count++)
-					{
-						WriteBuffer[Count+DATA_OFFSET] = config_p[Count+Page*PAGE_SIZE ];
-					}
-				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,total_SIZE%PAGE_SIZE, WRITE_CMD);
-
-			  }
-			  else{
-					for (Count = 0; Count < PAGE_SIZE; Count++)
-					{
-						WriteBuffer[Count+DATA_OFFSET] = config_p[Page*PAGE_SIZE + Count];
-					}
-				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,PAGE_SIZE, WRITE_CMD);
-			  }
-		    }
-
+	FlashWrite(QspiInstancePtr, PARAMCONF_ADDR, config_p, total_SIZE);
 
 		/*
 		 * Read the contents of the FLASH from TEST_ADDRESS, using Fast Read
 		 * command
 		 */
 	memset(ReadBuffer,0xEE,MAX_DATA);//清除read buffer数据，方便与write buffer 比较
-
-	FlashRead(QspiInstancePtr, PARAMCONF_ADDR, total_SIZE, READ_CMD);
-	xil_printf("\n\r - -- -- - - ---- ---READ - - -- ------ - - --\n\r");
-	for (Count = 0; Count <total_SIZE; Count++) {
-			xil_printf(" 0x%x ", ReadBuffer[Count+DATA_OFFSET]);
+	BufferPtr = &ReadBuffer[0];
+	FlashRead(QspiInstancePtr, PARAMCONF_ADDR, BufferPtr, 258);
+//	xil_printf("\n\r ------------FLASH SEND FUNCTION------------------- \n\r");
+	for (Count = 0; Count <258; Count++)
+//		xil_printf(" 0X%x ",BufferPtr[Count]);
+	{
+		if (BufferPtr[Count] !=ReadBuffer[Count+DATA_OFFSET])
+			return XST_FAILURE;
 	}
 
 		/*
 		 * Setup a pointer to the start of the data that was read into the read
 		 * buffer and verify the data read is the data that was written
 		 */
-
-
-//		if (BufferPtr[Count] != (u8)(UniqueValue + Test)) {
-//			return XST_FAILURE;
-//			}
-
 
 	return XST_SUCCESS;
 
@@ -383,7 +392,6 @@ int QspiFlashPolledExample(XQspiPs *QspiInstancePtr, u8 *recv_buf, u16 QspiDevic
 		 */
 
 
-//	FlashQuadEnableQspiInstancePtr();
 
 	/* Erase the flash.*/
 	QspiInstancePtr->SendBufferPtr = recv_buf;
@@ -467,62 +475,91 @@ int QspiFlashPolledExample(XQspiPs *QspiInstancePtr, u8 *recv_buf, u16 QspiDevic
 * @note		None.
 *
 ******************************************************************************/
-void FlashWrite(XQspiPs *QspiPtr, u32 Address, u32 ByteCount, u8 Command)
+void FlashWrite(XQspiPs *QspiPtr, u32 Address, u8 *WriteBuffer, u32 ByteCount)
 {
+
 	u8 WriteEnableCmd = { WRITE_ENABLE_CMD };
 	u8 ReadStatusCmd[] = { READ_STATUS_CMD, 0 };  /* must send 2 bytes */
 	u8 FlashStatus[2];
-
+	u8 WriteBuffer_tt[256 + DATA_OFFSET];
+	u32 i;
+	u32 Page;
+	u32 Address_tt;
+	u32 write_cnt;
 	/*
 	 * Send the write enable command to the FLASH so that it can be
 	 * written to, this needs to be sent as a seperate transfer before
 	 * the write
 	 */
-	XQspiPs_PolledTransfer(QspiPtr, &WriteEnableCmd, NULL,
-				sizeof(WriteEnableCmd));
+
+	Address_tt = Address;
+
 
 
 	/*
 	 * Setup the write command with the specified address and data for the
 	 * FLASH
 	 */
-	WriteBuffer[COMMAND_OFFSET]   = Command;
-	WriteBuffer[ADDRESS_1_OFFSET] = (u8)((Address & 0xFF0000) >> 16);
-	WriteBuffer[ADDRESS_2_OFFSET] = (u8)((Address & 0xFF00) >> 8);
-	WriteBuffer[ADDRESS_3_OFFSET] = (u8)(Address & 0xFF);
 
+	//	for (Page = 0; Page < (total_SIZE-1)/PAGE_SIZE + 1; Page++) {
+	//			  if(Page == (total_SIZE-1)/PAGE_SIZE){
+	//					for (Count = 0; Count < total_SIZE%PAGE_SIZE; Count++)
+	//					{
+	//						WriteBuffer[Count+DATA_OFFSET] = config_p[Count+Page*PAGE_SIZE ];
+	//					}
+	//				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,total_SIZE%PAGE_SIZE, WRITE_CMD);
+	//
+	//			  }
+	//			  else{
+	//					for (Count = 0; Count < PAGE_SIZE; Count++)
+	//					{
+	//						WriteBuffer[Count+DATA_OFFSET] = config_p[Page*PAGE_SIZE + Count];
+	//					}
+	//				  FlashWrite(QspiInstancePtr,  Page*PAGE_SIZE + PARAMCONF_ADDR,PAGE_SIZE, WRITE_CMD);
+	//			  }
+	//		    }
+
+	for(Page = 0; Page < (ByteCount-1)/PAGE_SIZE + 1; Page++){
+
+		Address_tt = Address + Page*PAGE_SIZE;
+		XQspiPs_PolledTransfer(QspiPtr, &WriteEnableCmd, NULL,
+					sizeof(WriteEnableCmd));
+			WriteBuffer_tt[COMMAND_OFFSET]   = WRITE_CMD;
+			WriteBuffer_tt[ADDRESS_1_OFFSET] = (u8)((Address_tt & 0xFF0000) >> 16);
+			WriteBuffer_tt[ADDRESS_2_OFFSET] = (u8)((Address_tt & 0xFF00) >> 8);
+			WriteBuffer_tt[ADDRESS_3_OFFSET] = (u8)(Address_tt & 0xFF);
+
+//			if(Page == (ByteCount-1)/PAGE_SIZE)
+//				write_cnt = ByteCount%PAGE_SIZE;
+//			else
+//				write_cnt = PAGE_SIZE;
+			write_cnt = (Page == (ByteCount-1)/PAGE_SIZE) ? ByteCount%PAGE_SIZE : PAGE_SIZE;
+
+			for(i = 0; i < write_cnt; i = i + 1){
+						WriteBuffer_tt[DATA_OFFSET + i] = WriteBuffer[Page*PAGE_SIZE + i];
+			}
 	/*
 	 * Send the write command, address, and data to the FLASH to be
 	 * written, no receive buffer is specified since there is nothing to
 	 * receive
 	 */
-	XQspiPs_PolledTransfer(QspiPtr, WriteBuffer, NULL,
-				ByteCount + OVERHEAD_SIZE);
+			XQspiPs_PolledTransfer(QspiPtr, WriteBuffer_tt, NULL,
+					write_cnt + OVERHEAD_SIZE);
 
 	/*
 	 * Wait for the write command to the FLASH to be completed, it takes
 	 * some time for the data to be written
 	 */
-	while (1) {
+
 		/*
 		 * Poll the status register of the FLASH to determine when it
 		 * completes, by sending a read status command and receiving the
 		 * status byte
 		 */
-		XQspiPs_PolledTransfer(QspiPtr, ReadStatusCmd, FlashStatus,
-					sizeof(ReadStatusCmd));
+			do{XQspiPs_PolledTransfer(QspiPtr, ReadStatusCmd, FlashStatus,
+						sizeof(ReadStatusCmd));
+			} while ((FlashStatus[1] | FlashStatus[0]) & 0x01);
 
-		/*
-		 * If the status indicates the write is done, then stop waiting,
-		 * if a value of 0xFF in the status byte is read from the
-		 * device and this loop never exits, the device slave select is
-		 * possibly incorrect such that the device status is not being
-		 * read
-		 */
-		FlashStatus[1] |= FlashStatus[0];
-		if ((FlashStatus[1] & 0x01) == 0) {
-			break;
-		}
 	}
 }
 
@@ -544,28 +581,38 @@ void FlashWrite(XQspiPs *QspiPtr, u32 Address, u32 ByteCount, u8 Command)
 * @note		None.
 *
 ******************************************************************************/
-void FlashRead(XQspiPs *QspiPtr, u32 Address, u32 ByteCount, u8 Command)
+void FlashRead(XQspiPs *QspiPtr, u32 Address, u8 *ReadBuffer, u32 ByteCount)
 {
+
+	u8 WriteBuffer_tt[4];
+	u8 READBuffer_tt[ByteCount + OVERHEAD_SIZE];
+	u32 Count;
 	/*
 	 * Setup the write command with the specified address and data for the
 	 * FLASH
 	 */
-	WriteBuffer[COMMAND_OFFSET]   = Command;
-	WriteBuffer[ADDRESS_1_OFFSET] = (u8)((Address & 0xFF0000) >> 16);
-	WriteBuffer[ADDRESS_2_OFFSET] = (u8)((Address & 0xFF00) >> 8);
-	WriteBuffer[ADDRESS_3_OFFSET] = (u8)(Address & 0xFF);
+	WriteBuffer_tt[COMMAND_OFFSET]   = READ_CMD;
+	WriteBuffer_tt[ADDRESS_1_OFFSET] = (u8)((Address & 0xFF0000) >> 16);
+	WriteBuffer_tt[ADDRESS_2_OFFSET] = (u8)((Address & 0xFF00) >> 8);
+	WriteBuffer_tt[ADDRESS_3_OFFSET] = (u8)(Address & 0xFF);
 
-	if ((Command == FAST_READ_CMD) || (Command == DUAL_READ_CMD) ||
-	    (Command == QUAD_READ_CMD)) {
-		ByteCount += DUMMY_SIZE;
-	}
+//	if ((Command == FAST_READ_CMD) || (Command == DUAL_READ_CMD) ||
+//	    (Command == QUAD_READ_CMD)) {
+//		ByteCount += DUMMY_SIZE;
+//	}
 	/*
 	 * Send the read command to the FLASH to read the specified number
 	 * of bytes from the FLASH, send the read command and address and
 	 * receive the specified number of bytes of data in the data buffer
 	 */
-	XQspiPs_PolledTransfer(QspiPtr, WriteBuffer, ReadBuffer,
+//	XQspiPs_PolledTransfer(QspiPtr, WriteBuffer, ReadBuffer,
+//				ByteCount + OVERHEAD_SIZE);
+//}
+	XQspiPs_PolledTransfer(QspiPtr, WriteBuffer_tt, READBuffer_tt,
 				ByteCount + OVERHEAD_SIZE);
+
+	memcpy (ReadBuffer, READBuffer_tt+4, ByteCount );
+
 }
 
 /*****************************************************************************/

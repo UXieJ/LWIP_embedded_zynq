@@ -46,13 +46,13 @@ u16 crc_16(u8* data, u16 len)
 
 
 //little-endian convert to big-endian
-u32_t convert_end32(u32_t A)
+u32 convert_end32(u32 A)
 {
 	A=((A<<8)& 0xFF00FF00) |((A>>8)&0xFF00FF);
 	return (A<<16) | (A>>16);
 }
 
-u16_t convert_end16(u16_t B)
+u16 convert_end16(u16 B)
 {
 	B=(B <<8) | (B >>8);
 	return B;

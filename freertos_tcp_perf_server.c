@@ -46,6 +46,7 @@ extern u8 pingpang_flag;
 extern EventGroupHandle_t EventGroupHandler;
 extern TaskHandle_t UDPAPP_Handler;
 extern TaskHandle_t UDPCAST_Handler;
+extern u8 IP_ADDRESS[];
 
 //flash public variable
 XQspiPs QspiInstance;
@@ -53,8 +54,10 @@ extern int UpdateFlag;
 int FlashStatus;
 int current_bank;
 extern u8 config_p[];
+extern u8 ReadBuffer_config[];
 
 u8 recv_buf;
+
 
 
 //define tcp variable
@@ -66,9 +69,10 @@ struct tcp_msg tcp_ctlACK_p;
 struct tcp_msg tcp_firmware_p;
 struct tcp_msg tcp_WriteConfig_p;
 
+
 u16 crc_16();
-u32_t convert_end32();
-u16_t convert_end16();
+u32 convert_end32();
+u16 convert_end16();
 
 #define EVENTBIT_0 (1<<0)
 #define EVENTBIT_1 (1<<1)
@@ -79,7 +83,6 @@ u16_t convert_end16();
 /* Interval time in seconds */
 #define REPORT_INTERVAL_TIME (INTERIM_REPORT_INTERVAL * 1000)
 int QspiFlashInit();
-int QspiFlashPolledExample();
 int FlashSend();
 
 void print_app_header(void)
@@ -324,6 +327,8 @@ struct tcp_msg *tcp_WriteConfig(struct tcp_msg *tcp_WriteConfig_p, u16 crct, u32
 }
 
 
+
+
 static void stats_buffer(char* outString, double data, enum measure_t type)
 {
 	int conv = KCONV_UNIT;
@@ -467,6 +472,10 @@ void tcp_recv_perf_traffic(void *p)
 	int sock = *((int *)p);
 	static u8 heartBeat[]="No heart beat from the PC. TCP is disconnected.";
 	static u8 INVALIDCOMMAND[]="------ERROR:INVALID COMMAND FROM CLIENT-------";
+
+
+	u8 MAC_ADDR[6];
+
 	server.start_time = sys_now() * portTICK_RATE_MS;
 	server.client_id++;
 	server.i_report.last_report_time = 0;
@@ -513,14 +522,24 @@ void tcp_recv_perf_traffic(void *p)
 		}
 		/* Record total bytes for final report */
 		server.total_bytes += read_bytes;
+
+
+		int j;
+		int cur;
 		//determine the total length of receive buffer: 4+4+4+4+2 + length of data (byte)
 //		u16 total = data_length + 18 ;
 		xil_printf("   total length: %d \n\r", read_bytes);
+
 
 		u8 header1=0x4C;
 		u8 header2=0x73;
 		u8 header3=0x44;
 		u8 header4=0x52;
+
+		u8 transfer_config[278];
+		u8 FraLenCom[] = {0x48,0x4f,0x53,0x54,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x0D};
+	//	u8 seq[4] =seq1;
+		u8 seq[] = {0x12,0x34,0x56,0x78};
 
 		for(int num = 0;num<read_bytes-3;num++) //to find out the FIRST valid bit from the upcoming frame
 		{
@@ -528,11 +547,12 @@ void tcp_recv_perf_traffic(void *p)
 			{
 
 				data_length = recv_buf[num+6]*256+recv_buf[num+7]; //the LENGTH of the data of current received buf
-//				xil_printf(" num: %x \n",num);
 				u32 seqs = (recv_buf[num+12] << 24) | (recv_buf[num+13] << 16) | (recv_buf[num+14] << 8) | recv_buf[num+15];
-				u16 recv_crc =  convert_end16((recv_buf[num+17]<<8)| recv_buf[num+18]);
+				u16 recv_crc =  (recv_buf[num+data_length+16]<<8) | recv_buf[num+data_length+17]; //发过来的数据，不需要转换，不需要convert_end16
 				u16 crc_t =crc_16(recv_buf+num,data_length+16);
+
 				u16 diff = crc_t-recv_crc;
+//				xil_printf("ttt diff %x ",diff);
 
 
 				if (recv_buf[num+11]==0x02)
@@ -549,10 +569,10 @@ void tcp_recv_perf_traffic(void *p)
 				{
 				/* xil_printf(" sequence: %d  ",seqs);
 					 * u32 ttttt =(recv_buf[0]<<24) |(recv_buf[1] << 16) | (recv_buf[2]<<8) | recv_buf[3];
-					 * TESE CASE1: 4C 73 44 52 00 00 00 01 00 00 00 11 00 00 00 01 00 69 AD
-					 * TEST CASE2: 4C 73 44 52 00 00 00 01 00 00 00 12 00 00 00 01 00 14 A1
-		//			xil_printf("Is crc start coming?%x\n\r", crc_t);
-					CRC little endian */
+					 * TESE CASE1: 4C 73 44 52 00 00 00 01 00 00 00 11 00 00 00 01 00 AD 69
+					 * TEST CASE2: 4C 73 44 52 00 00 00 01 00 00 00 12 00 00 00 01 00 A1 14
+ 						xil_printf("Is crc start coming?%x\n\r", crc_t);
+					little endian is not need to be considered since it's array not struct */
 					send(sock,tcp_start_ack(&tcp_ack_p,diff, seqs), 19,0);
 					xEventGroupSetBits(EventGroupHandler, EVENTBIT_0);
 				}
@@ -586,71 +606,149 @@ void tcp_recv_perf_traffic(void *p)
 					send(sock,tcp_FirmwareUpdate(&tcp_firmware_p,diff, seqs), 19,0);
 				}
 
-				else if(recv_buf[num+11]== 0x06)
+				else if((recv_buf[num+11]== 0x06)&&(diff==0))
 				{
-					for(int j=0;j<data_length-1;j++)
+
+					for(j=0;j<data_length;j++)
 					{
 						config_p[j]=recv_buf[num+16+j];
 //						xil_printf(" 0X%x ",config_p[j]);
 					}
-					if(config_p[0]==0x03&& config_p[2]==0x04)
-
+					if(data_length!=258)
 					{
-						u8 IP_ADDR[3]={0};
-						IP_ADDR[0]=config_p[1];
-						IP_ADDR[1]=config_p[3];
-						IP_ADDR[2]=config_p[5];
-						IP_ADDR[3]=config_p[7];
-						xil_printf("ip address: %x %x %x %x",IP_ADDR[0],IP_ADDR[1],IP_ADDR[2],IP_ADDR[3]);
-					}
 
-					if(config_p[0]==0x07 && config_p[2]==0x08)
-					{
-						u8 MAC_ADDR[5]={0};
-						MAC_ADDR[0]=config_p[1];
-						MAC_ADDR[1]=config_p[3];
-						MAC_ADDR[2]=config_p[5];
-						MAC_ADDR[3]=config_p[7];
-						MAC_ADDR[4]=config_p[9];
-						MAC_ADDR[5]=config_p[11];
-						xil_printf("ip address: %x %x %x %x %x",MAC_ADDR[0],MAC_ADDR[1],MAC_ADDR[2],MAC_ADDR[3],MAC_ADDR[4],MAC_ADDR[5]);
+						if(config_p[0]==0x00) //WORKING MODE ALTERNATIVE
 
-					}
-					if(config_p[0]==0x12)
-					{
-//						int BANK = config_p[1];
+						{
+							ReadBuffer_config[1]=config_p[1];
+//							xil_printf("-------------------------------- \n\r");
+//							for(j=0;j<257;j++)
+//							{
+//								xil_printf(" 0x%x ",ReadBuffer_config[j]);
+//							}
+						}
+						if(config_p[0]==0x03&& config_p[2]==0x04) //MODIFY IP ADDRESS
+						{
+							IP_ADDRESS[0]=config_p[1];
+							IP_ADDRESS[1]=config_p[3];
+							IP_ADDRESS[2]=config_p[5];
+							IP_ADDRESS[3]=config_p[7];
+							for(cur=0;cur<data_length-2;cur++) //crc is not need, then the length should minus 2
+							{
+								ReadBuffer_config[cur+6] =config_p[cur];
+							}
+//							xil_printf("-------------------------------- \n\r");
+//							for(j=0;j<257;j++)
+//							{
+//								xil_printf(" 0x%x ",ReadBuffer_config[j]);
+//							}
+						}
 
-					}
+						if(config_p[0]==0x07 && config_p[2]==0x08) //MODIFY MAC ADDRESS
+						{
+							MAC_ADDR[0]=config_p[1];
+							MAC_ADDR[1]=config_p[3];
+							MAC_ADDR[2]=config_p[5];
+							MAC_ADDR[3]=config_p[7];
+							MAC_ADDR[4]=config_p[9];
+							MAC_ADDR[5]=config_p[11];
+//							xil_printf("MAC address: %x %x %x %x %x",MAC_ADDR[0],MAC_ADDR[1],MAC_ADDR[2],MAC_ADDR[3],MAC_ADDR[4],MAC_ADDR[5]);
+							xil_printf("\n\r-------------------------------- \n\r");
 
-					FlashStatus = FlashSend(&QspiInstance,XPAR_XQSPIPS_0_DEVICE_ID, config_p);
-					if (FlashStatus != XST_SUCCESS)
-					{
-						xil_printf("QSPI FLASH configuration Test Failed\r\n");
+							for(cur=0;cur<data_length-2;cur++) //crc is not need, then the length should minus 2
+							{
+								ReadBuffer_config[cur+14] =config_p[cur];
+							}
+
+							u16 re_crc =crc_16(ReadBuffer_config,256);
+							ReadBuffer_config[256]=re_crc>>8;
+							ReadBuffer_config[257] =re_crc & 0x00FF;
+//							for(j=0;j<258;j++)
+//							{
+////								xil_printf("set value %x %x",ReadBuffer_config[256],ReadBuffer_config[257]);
+//								xil_printf(" %x ",ReadBuffer_config[j]);
+//							}
+
+
+						}
+						/*	if(config_p[0]==0x12)
+						{
+							int BANK = config_p[1];
+
+						}
+							暂时先不写入flash
+						*/
+
+						FlashStatus = FlashSend(&QspiInstance,XPAR_XQSPIPS_0_DEVICE_ID, ReadBuffer_config);
+						if (FlashStatus != XST_SUCCESS)
+						{
+							xil_printf("QSPI FLASH configuration MODIFY Failed.\r\n");
+						}
+						else
+						{
+							xil_printf("QSPI FLASH configuration MODIFY Success.\r\n");
+						}
+						send(sock,tcp_WriteConfig(&tcp_WriteConfig_p,diff, seqs), 19,0);
+
 					}
 					else
 					{
-						xil_printf("Successfully ran send configuration Test\r\n");
+						FlashStatus = FlashSend(&QspiInstance,XPAR_XQSPIPS_0_DEVICE_ID, config_p);
+						if (FlashStatus != XST_SUCCESS)
+						{
+							xil_printf("QSPI FLASH configuration Test Failed\r\n");
+						}
+						else
+						{
+							xil_printf("Successfully ran send configuration Test\r\n");
+						}
+						send(sock,tcp_WriteConfig(&tcp_WriteConfig_p,diff, seqs), 19,0);
+
 					}
-					send(sock,tcp_WriteConfig(&tcp_WriteConfig_p,diff, seqs), 19,0);
-
 				}
-
+				else if((recv_buf[num+11]== 0x06)&&(diff!=0))
+				{
+					send(sock,tcp_WriteConfig(&tcp_WriteConfig_p,diff, seqs), 19,0);
+					xil_printf("The command is 06, and it failed because of the CRC check is failed ");
+				}
 				else if(recv_buf[num+11]== 0x0D)
 				{
 					//READ CONFIGURATION create another thread
-					UpdateFlag=1;
-					vTaskDelete(UDPAPP_Handler);
+					 if(recv_buf[num+16]==00)
+					 {
+
+						 xil_printf("-------------struct-------------\n\r");
+						 int i=0;
+						 for(int fig_num=0;fig_num<274;fig_num++)
+						 {
+							if(fig_num<12)
+							{
+								transfer_config[fig_num]=FraLenCom[fig_num];
+							}
+							else if(fig_num>11 && fig_num<16)
+							{
+								transfer_config[fig_num]=seq[i];
+								i=i+1;
+//								 xil_printf("%x, %d",seq[i],fig_num);
+							}
+							else if(fig_num>15)
+							{
+								transfer_config[fig_num]=ReadBuffer_config[fig_num-16];
+							}
+//							 xil_printf(" %x  ",transfer_config[fig_num]);
+
+						 }
+						 u16 fig_crc=crc_16(transfer_config,274);
+						 transfer_config[274]=fig_crc>>8;
+						 transfer_config[275] =fig_crc & 0x00FF;
+//						 xil_printf("\n\r crc: %x, cal_crc %x %x", fig_crc,transfer_config[274], transfer_config[275]);
+						 send(sock,transfer_config,276,0);
+
+						}
+
+
+
  //strcpy memcpy recv_buf[num]
-					FlashStatus = QspiFlashPolledExample(&QspiInstance, &recv_buf, XPAR_XQSPIPS_0_DEVICE_ID);
-					if (FlashStatus != XST_SUCCESS)
-					{
-						xil_printf("QSPI FLASH Polled Example Test Failed\r\n");
-					}
-					else
-					{
-						xil_printf("Successfully ran QSPI FLASH Polled Example Test\r\n");
-						UpdateFlag=0;
-					}
 
 				}
 
@@ -716,7 +814,7 @@ void TCP_application(void)
 	}
 
 	size = sizeof(remote);
-
+//Flash init 需要转移到main。c
 	FlashStatus = QspiFlashInit(&QspiInstance, XPAR_XQSPIPS_0_DEVICE_ID);
 	if (FlashStatus != XST_SUCCESS) {
 		xil_printf("QSPI Flash initial test failed.\r\n");

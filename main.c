@@ -64,6 +64,8 @@ TaskHandle_t UDPAPP_Handler;
 TaskHandle_t UDPCAST_Handler;
 
 u8 config_p [258]={0}; //store the configure info [flash/tcp]
+u8 IP_ADDRESS[4]={0xC0, 0xA8, 0x01,0x0A};
+u32 IP_Convert_Address;
 
 /************************** Function Prototypes ******************************/
 void print_app_header();
@@ -105,7 +107,7 @@ static void assign_default_ip(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 {
 	int err;
 
-	xil_printf("Configuring default IP %s \r\n", DEFAULT_IP_ADDRESS);
+//	xil_printf("Configuring default IP %s \r\n", DEFAULT_IP_ADDRESS);
 
 	err = inet_aton(DEFAULT_IP_ADDRESS, ip);
 	if(!err)
@@ -126,7 +128,7 @@ void network_thread(void *p)
 #if ((LWIP_IPV6==0) && (LWIP_DHCP==1))
 	int mscnt = 0;
 #endif
-
+	// flash init
 	/* the mac address of the board. this should be unique per board */
 	u8_t mac_ethernet_address[] = { 0x00, 0x0a, 0x35, 0x00, 0x01, 0x02 };
 
